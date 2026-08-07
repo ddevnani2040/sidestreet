@@ -1,0 +1,10 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+google-account-details.md
+what-i-want-to-build.md
+project-details.md
+frames/
