@@ -86,8 +86,6 @@ def all_manhattan(all_cameras: list[dict]) -> list[Camera]:
     for c in all_cameras:
         if str(c.get("isOnline")).lower() != "true":
             continue
-        if c.get("area") != "Manhattan":
-            continue
         if c.get("latitude") is None or c.get("longitude") is None:
             continue
         street = _primary_street(c.get("name", ""))

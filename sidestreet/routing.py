@@ -228,6 +228,34 @@ async def _call(client: httpx.AsyncClient, body: dict) -> list[dict]:
     return r.json().get("routes", [])
 
 
+def _lateral_waypoints(path: list[tuple[float, float]]) -> dict[str, tuple]:
+    """Waypoints offset sideways from the main route, to force side streets.
+
+    Diverting between parallel *avenues* is not side-street routing -- avenues
+    are main arteries too. Offsetting perpendicular to the baseline path pushes
+    Google onto whatever smaller road actually runs parallel there, and it works
+    anywhere: Manhattan's grid, Queens, Staten Island. Google snaps each offset
+    to a real road and returns a real duration, so the side street is costed by
+    Google rather than guessed at by us.
+    """
+    if len(path) < 4:
+        return {}
+    out: dict[str, tuple] = {}
+    for frac in (0.35, 0.65):
+        i = int(len(path) * frac)
+        a, b = path[max(i - 1, 0)], path[min(i + 1, len(path) - 1)]
+        dlat, dlon = b[0] - a[0], b[1] - a[1]
+        norm = math.hypot(dlat, dlon) or 1e-9
+        # Perpendicular unit vector, scaled to roughly 350m.
+        plat, plon = -dlon / norm, dlat / norm
+        for sign, side in ((1, "east"), (-1, "west")):
+            out[f"side streets ({side}, {int(frac * 100)}%)"] = (
+                path[i][0] + plat * sign * 0.0032,
+                path[i][1] + plon * sign * 0.0032,
+            )
+    return out
+
+
 def _avenue_waypoints(origin, destination) -> dict[str, tuple[float, float]]:
     """One waypoint per avenue: the camera nearest the trip's midpoint.
 
@@ -283,13 +311,28 @@ async def compare(origin, destination) -> dict:
         seen_polylines: set[str] = set()
 
         raw: list[tuple[str, dict]] = [("Google Maps", base[0])]
-        for avenue, via in _avenue_waypoints(origin, destination).items():
+        base_path = decode_polyline(base[0]["polyline"]["encodedPolyline"])
+
+        # Surface-street variant: pushes the route off FDR/BQE-type highways,
+        # which is often exactly the "take the side streets" answer.
+        try:
+            b = _body(origin, destination)
+            b["routeModifiers"] = {"avoidHighways": True}
+            rs = await _call(client, b)
+            if rs:
+                raw.append(("avoiding highways", rs[0]))
+        except Exception:
+            pass
+
+        vias = dict(_avenue_waypoints(origin, destination))
+        vias.update(_lateral_waypoints(base_path))
+        for name, via in vias.items():
             try:
                 rs = await _call(client, _body(origin, destination, via))
             except Exception:
                 continue
             if rs:
-                raw.append((f"via {avenue}", rs[0]))
+                raw.append((name if name.startswith(("side", "avoid")) else f"via {name}", rs[0]))
 
         # Detect on demand for any camera these routes cross that the background
         # poller does not cover, so an arbitrary address still gets real data.
