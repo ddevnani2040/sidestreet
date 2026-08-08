@@ -184,6 +184,30 @@ def _build_rungs(cams: list[Camera], limit: int) -> list[Camera]:
     return chosen
 
 
+# The focus region: 14th St to 72nd St, river to river. Every demo route sits
+# inside it, and every camera in it is polled -- no sampling. Spreading a fixed
+# budget across five boroughs left this area sampled every ~1.3km, which is too
+# coarse to judge a two-mile crosstown trip. Better to cover one dense region
+# properly than the whole city thinly, and dense surface streets are where camera
+# evidence beats phone-speed data anyway.
+FOCUS_BOX = (40.732, 40.782, -74.015, -73.950)  # lat_min, lat_max, lon_min, lon_max
+
+
+def select_focus(all_cameras: list[dict], limit: int) -> list[Camera]:
+    """Every online camera inside the focus region, nearest-centre first."""
+    lat_min, lat_max, lon_min, lon_max = FOCUS_BOX
+    sel = [
+        c
+        for c in all_manhattan(all_cameras)
+        if lat_min <= c.lat <= lat_max and lon_min <= c.lon <= lon_max
+    ]
+    # If the budget cannot hold the region, keep the middle rather than an edge.
+    clat = (lat_min + lat_max) / 2
+    clon = (lon_min + lon_max) / 2
+    sel.sort(key=lambda c: abs(c.lat - clat) + abs(c.lon - clon))
+    return sel[:limit]
+
+
 def select_citywide(all_cameras: list[dict], limit: int) -> list[Camera]:
     """Spread the polled budget over the whole city, not one corridor.
 
@@ -194,10 +218,21 @@ def select_citywide(all_cameras: list[dict], limit: int) -> list[Camera]:
     all of it and Staten Island none.
     """
     cams = all_manhattan(all_cameras)  # all boroughs despite the name
+
+    # Manhattan gets a finer grid and more picks per round. Even allocation
+    # across five boroughs left Manhattan sampled every ~1.3km, too sparse to
+    # judge a two-mile crosstown trip -- and dense surface streets are exactly
+    # where camera evidence beats phone-speed data. The outer boroughs still get
+    # standing coverage, just at lower resolution.
+    grid = {"Manhattan": (0.005, 0.006)}
+    picks_per_round = {"Manhattan": 3}
+
     by_borough: dict[str, dict[tuple, Camera]] = {}
     for c in cams:
-        cell = (round(c.lat / 0.012), round(c.lon / 0.015))
-        by_borough.setdefault(c.area or "?", {}).setdefault(cell, c)
+        area = c.area or "?"
+        dlat, dlon = grid.get(area, (0.012, 0.015))
+        cell = (round(c.lat / dlat), round(c.lon / dlon))
+        by_borough.setdefault(area, {}).setdefault(cell, c)
 
     queues = {b: list(cells.values()) for b, cells in by_borough.items()}
     for q in queues.values():
@@ -205,7 +240,12 @@ def select_citywide(all_cameras: list[dict], limit: int) -> list[Camera]:
 
     chosen: list[Camera] = []
     while len(chosen) < limit and any(queues.values()):
+        progressed = False
         for b in sorted(queues):
-            if queues[b] and len(chosen) < limit:
-                chosen.append(queues[b].pop(0))
+            for _ in range(picks_per_round.get(b, 1)):
+                if queues[b] and len(chosen) < limit:
+                    chosen.append(queues[b].pop(0))
+                    progressed = True
+        if not progressed:
+            break
     return chosen

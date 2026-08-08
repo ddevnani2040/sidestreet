@@ -125,9 +125,25 @@ rejects OAuth, so addresses are resolved by the Routes API itself.
 ## Scale note
 
 963 cameras polled every 15s would be ~64 inference calls/second and would
-exhaust a Roboflow quota within minutes. So all 375 Manhattan cameras are
-registered, 56 are polled continuously, and the rest are detected **on demand**
-when a requested route actually crosses them.
+exhaust a Roboflow quota within minutes. So the app covers **one region
+completely** rather than the whole city thinly: every DOT camera between 14th and
+72nd St, river to river (200 of them), polled on a 45s cycle. All 963 cameras
+citywide stay registered and are detected **on demand** if a route leaves the
+region.
+
+An earlier build spread a fixed budget evenly across five boroughs, which left
+Midtown sampled every ~1.3km -- too coarse to judge a two-mile crosstown trip.
+
+## Does it actually beat Google?
+
+Sometimes, and the app says so when it does not. Google's routing is already
+traffic-aware and genuinely good; on a congested Friday evening its choice often
+survives camera scrutiny, and Sidestreet reports "no better route" rather than
+inventing a diversion. The value shows up when one corridor is jammed and a
+parallel one is not -- which is a real condition, not a constant one.
+
+This is deliberate. A router that always claims to beat Google would be lying
+most of the time.
 
 ## Data
 

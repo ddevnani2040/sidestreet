@@ -118,8 +118,7 @@ INDEX_HTML = """
   <div class="head">
     <h1>Sidestreet</h1>
     <p>Google routes by predicted time. We route by what the cameras see.
-    Best on short surface-street trips — on motorways a camera cannot tell
-    fast-and-full from stopped-and-full, and Google's data is stronger there.</p>
+    Covering every DOT camera between 14th and 72nd St, river to river.</p>
   </div>
   <div class="trip">
     <input id="from" placeholder="From — address or place">
@@ -144,7 +143,11 @@ INDEX_HTML = """
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const COLORS = {free:'#34d058', moderate:'#f2c94c', jammed:'#ff5f56', unknown:'#59616f'};
-const map = L.map('map', {zoomControl:false}).setView([40.7600,-73.9700], 13);
+const map = L.map('map', {zoomControl:false}).setView([40.7570,-73.9800], 14);
+// The covered region: every camera inside it is polled. Drawn so it is obvious
+// where the app has evidence and where it does not.
+const FOCUS = [[40.732,-74.015],[40.782,-73.950]];
+L.rectangle(FOCUS, {color:'#3b4a63', weight:1, fill:false, dashArray:'4,6'}).addTo(map);
 L.control.zoom({position:'bottomright'}).addTo(map);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   attribution:'&copy; OpenStreetMap, &copy; CARTO', subdomains:'abcd', maxZoom:19
@@ -255,7 +258,7 @@ function draw() {
   document.getElementById('why').innerHTML = '<b>Why:</b> ' + data.explanation;
   showCams(same ? g : s);
   map.fitBounds(L.polyline(g.path.concat(s.path)).getBounds(), {
-    paddingTopLeft:[406,40], paddingBottomRight:[40,40]});
+    paddingTopLeft:[406,60], paddingBottomRight:[60,60], maxZoom:15});
 }
 
 function card(cls, who, r) {

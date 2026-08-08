@@ -13,7 +13,7 @@ from datetime import datetime
 import httpx
 
 from . import config, detect
-from .corridor import all_manhattan, select_citywide
+from .corridor import all_manhattan, select_focus
 from .store import STORE, CameraState
 
 _task: asyncio.Task | None = None
@@ -45,7 +45,7 @@ async def bootstrap(client: httpx.AsyncClient) -> None:
             lon=cam.lon,
             direction=cam.direction,
         )
-    STORE.hot = {c.id for c in select_citywide(raw, config.MAX_CAMERAS)}
+    STORE.hot = {c.id for c in select_focus(raw, config.MAX_CAMERAS)}
 
 
 async def ensure_fresh(cam_ids: list[str], client: httpx.AsyncClient) -> None:
