@@ -54,6 +54,21 @@ INDEX_HTML = """
               width: 100%; margin-top: 8px; font-weight: 600; }
   button.go:hover { background: #2b7ff5; }
   button.go:disabled { opacity: .55; cursor: default; }
+  button.find {
+    width: 100%; margin-top: 6px; font-size: 12.5px; background: #1a2230;
+    border-color: #2f3d55; color: #9fc3ff;
+  }
+  button.find:hover { background: #212c3d; }
+  button.find:disabled { opacity: .55; cursor: default; }
+  .picks { border-top: 1px solid #232733; max-height: 210px; overflow-y: auto; }
+  .pick {
+    padding: 9px 18px; border-bottom: 1px solid #1c2029; cursor: pointer;
+    font-size: 12.5px;
+  }
+  .pick:hover { background: #161a22; }
+  .pick .t { font-weight: 600; }
+  .pick .d { color: #8b93a5; font-size: 11.5px; margin-top: 1px; }
+  .pick.best { border-left: 3px solid #34d058; }
 
   .routes { overflow-y: auto; flex: 1; }
   .route {
@@ -125,14 +140,17 @@ INDEX_HTML = """
     <input id="to" placeholder="To — address or place">
     <select id="trip">
       <option value="">— or pick a short demo route —</option>
-      <option value="Times Square, New York, NY|Union Square, New York, NY">Times Sq → Union Sq</option>
-      <option value="Grand Central Terminal, New York, NY|Columbus Circle, New York, NY">Grand Central → Columbus Circle</option>
-      <option value="Union Square, New York, NY|Grand Central Terminal, New York, NY">Union Sq → Grand Central</option>
-      <option value="Chelsea Market, New York, NY|Grand Central Terminal, New York, NY">Chelsea Market → Grand Central</option>
-      <option value="Grand Central Terminal, New York, NY|Times Square, New York, NY">Grand Central → Times Sq</option>
+      <option value="Columbus Circle, New York, NY|Union Square, New York, NY">Columbus Circle → Union Sq</option>
+      <option value="Union Square, New York, NY|United Nations Headquarters, New York, NY">Union Sq → UN HQ</option>
+      <option value="Grand Central Terminal, New York, NY|Union Square, New York, NY">Grand Central → Union Sq</option>
+      <option value="Times Square, New York, NY|Gramercy Park, New York, NY">Times Sq → Gramercy</option>
+      <option value="Grand Central Terminal, New York, NY|Javits Center, New York, NY">Grand Central → Javits</option>
+      <option value="Union Square, New York, NY|Penn Station, New York, NY">Union Sq → Penn Station</option>
     </select>
     <button class="go" id="go">Get directions</button>
+    <button class="find" id="find">⚡ Find the best demo route right now</button>
   </div>
+  <div class="picks" id="picks"></div>
   <div id="saved"></div>
   <div class="routes" id="routes"></div>
   <div class="why" id="why">Pick a trip and hit directions.</div>
@@ -287,6 +305,37 @@ function showCams(r) {
       const m = markers[el.dataset.c];
       if (m) { map.setView(m.getLatLng(), 16); m.openPopup(); }
     };
+  }
+}
+
+document.getElementById('find').onclick = findBest;
+
+async function findBest() {
+  const b = document.getElementById('find');
+  b.disabled = true; b.textContent = 'Scanning 14 trips…';
+  const box = document.getElementById('picks');
+  box.innerHTML = '<div class="pick"><div class="d">Checking live density on every candidate trip…</div></div>';
+  try {
+    const j = await (await fetch('/api/best?limit=6')).json();
+    if (j.detail) { box.innerHTML = `<div class="pick"><div class="d">Error: ${j.detail}</div></div>`; return; }
+    box.innerHTML = j.trips.map((t, i) => `
+      <div class="pick ${t.strictly_better ? 'best' : ''}" data-i="${i}">
+        <div class="t">${t.from} → ${t.to}${t.strictly_better ? '  ✓ fewer jams AND not slower' : ''}</div>
+        <div class="d">Google ${t.google_min}m · ${t.google_jammed} jammed of ${t.cameras} cams
+          → ours ${t.pick_min}m · ${t.pick_jammed} jammed</div>
+      </div>`).join('') ||
+      '<div class="pick"><div class="d">No diversions right now — try again in a minute.</div></div>';
+    for (const el of box.querySelectorAll('[data-i]')) {
+      el.onclick = () => {
+        const t = j.trips[+el.dataset.i];
+        document.getElementById('from').value = t.origin;
+        document.getElementById('to').value = t.destination;
+        document.getElementById('trip').value = '';
+        route();
+      };
+    }
+  } finally {
+    b.disabled = false; b.textContent = '⚡ Find the best demo route right now';
   }
 }
 

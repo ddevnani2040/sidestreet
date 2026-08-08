@@ -477,3 +477,84 @@ def _explain(google: Candidate | None, pick: Candidate) -> str:
         f"vs {len(google.cameras)} on Google's ({google.jammed} jammed, "
         f"{google.moderate} moderate)."
     )
+
+
+# Landmarks inside the covered region, used to hunt for a good live demo.
+DEMO_PLACES = {
+    "Union Sq": "Union Square, New York, NY",
+    "Times Sq": "Times Square, New York, NY",
+    "Grand Central": "Grand Central Terminal, New York, NY",
+    "Columbus Circle": "Columbus Circle, New York, NY",
+    "Chelsea Mkt": "Chelsea Market, New York, NY",
+    "Penn Station": "Penn Station, New York, NY",
+    "UN HQ": "United Nations Headquarters, New York, NY",
+    "Rockefeller": "Rockefeller Center, New York, NY",
+    "Gramercy": "Gramercy Park, New York, NY",
+    "Javits": "Javits Center, New York, NY",
+}
+
+DEMO_PAIRS = [
+    ("Columbus Circle", "Union Sq"), ("Union Sq", "UN HQ"),
+    ("Grand Central", "Union Sq"), ("Times Sq", "Gramercy"),
+    ("Grand Central", "Javits"), ("Union Sq", "Penn Station"),
+    ("Times Sq", "Chelsea Mkt"), ("Grand Central", "Chelsea Mkt"),
+    ("Union Sq", "Columbus Circle"), ("Rockefeller", "Union Sq"),
+    ("Penn Station", "UN HQ"), ("Chelsea Mkt", "Grand Central"),
+    ("Javits", "Gramercy"), ("Columbus Circle", "Gramercy"),
+]
+
+
+async def best_demo(limit: int = 6) -> dict:
+    """Scan candidate trips and rank them by how well they demo right now.
+
+    Traffic moves, so which trip shows a convincing diversion changes minute to
+    minute. Rather than hard-coding presets that may be flat when it matters,
+    this finds the live winners on demand. Route geometry is cached, so a repeat
+    scan is fast.
+    """
+    sem = asyncio.Semaphore(6)
+
+    async def one(a: str, b: str):
+        async with sem:
+            try:
+                r = await compare(DEMO_PLACES[a], DEMO_PLACES[b])
+            except Exception:
+                return None
+        g, s = r.get("google"), r.get("sidestreet")
+        if not g or not s:
+            return None
+        return {
+            "from": a,
+            "to": b,
+            "origin": DEMO_PLACES[a],
+            "destination": DEMO_PLACES[b],
+            "diverted": r["diverted"],
+            "saved_min": r["saved_min"],
+            "google_min": g["duration_min"],
+            "pick_min": s["duration_min"],
+            "google_jammed": g["jammed"],
+            "pick_jammed": s["jammed"],
+            "cameras": g["camera_count"],
+            "confidence": g["confidence"],
+            "pick_label": s["label"],
+            # The strongest story: fewer jams AND not slower.
+            "strictly_better": (
+                r["diverted"]
+                and s["jammed"] < g["jammed"]
+                and s["duration_s"] <= g["duration_s"]
+            ),
+        }
+
+    got = [x for x in await asyncio.gather(*(one(a, b) for a, b in DEMO_PAIRS)) if x]
+    got.sort(
+        key=lambda x: (
+            not x["strictly_better"],
+            -(x["google_jammed"] - x["pick_jammed"]),
+            -x["saved_min"],
+        )
+    )
+    return {
+        "scanned": len(got),
+        "strictly_better": sum(1 for x in got if x["strictly_better"]),
+        "trips": got[:limit],
+    }

@@ -88,6 +88,15 @@ async def geocode(q: str):
     return {"lat": lat, "lng": lng, "address": formatted}
 
 
+@app.get("/api/best")
+async def best(limit: int = 6):
+    """Rank candidate demo trips by how convincing they look right now."""
+    try:
+        return await routing.best_demo(limit)
+    except Exception as exc:
+        raise HTTPException(502, f"{type(exc).__name__}: {exc}"[:300])
+
+
 @app.get("/api/route")
 async def route(
     from_lat: float = 40.7488,
