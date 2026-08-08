@@ -117,18 +117,20 @@ INDEX_HTML = """
 <div id="panel">
   <div class="head">
     <h1>Sidestreet</h1>
-    <p>Google routes by predicted time. We route by what the cameras see.</p>
+    <p>Google routes by predicted time. We route by what the cameras see.
+    Best on short surface-street trips — on motorways a camera cannot tell
+    fast-and-full from stopped-and-full, and Google's data is stronger there.</p>
   </div>
   <div class="trip">
     <input id="from" placeholder="From — address or place">
     <input id="to" placeholder="To — address or place">
     <select id="trip">
-      <option value="">— or pick a preset —</option>
-      <option value="40.7488,-73.9700,40.7681,-73.9819">Tudor City → Columbus Circle</option>
-      <option value="40.7333,-73.9880,40.7787,-73.9540">E 14th → E 86th (up 3rd)</option>
-      <option value="40.7402,-73.9860,40.7790,-73.9550">Madison Sq → Upper East Side</option>
-      <option value="40.7643,-73.9740,40.7416,-73.9896">59th/5th → 23rd/5th (down 5th)</option>
-      <option value="40.7488,-73.9700,40.7879,-73.9540">Tudor City → E 96th</option>
+      <option value="">— or pick a short demo route —</option>
+      <option value="Times Square, New York, NY|Union Square, New York, NY">Times Sq → Union Sq</option>
+      <option value="Grand Central Terminal, New York, NY|Columbus Circle, New York, NY">Grand Central → Columbus Circle</option>
+      <option value="Union Square, New York, NY|Grand Central Terminal, New York, NY">Union Sq → Grand Central</option>
+      <option value="Chelsea Market, New York, NY|Grand Central Terminal, New York, NY">Chelsea Market → Grand Central</option>
+      <option value="Grand Central Terminal, New York, NY|Times Square, New York, NY">Grand Central → Times Sq</option>
     </select>
     <button class="go" id="go">Get directions</button>
   </div>
@@ -198,8 +200,10 @@ async function route() {
   if (from && to) {
     qs = `origin=${encodeURIComponent(from)}&destination=${encodeURIComponent(to)}`;
   } else if (preset) {
-    const [a,b,c,d] = preset.split(',');
-    qs = `from_lat=${a}&from_lng=${b}&to_lat=${c}&to_lng=${d}`;
+    const [o, dst] = preset.split('|');
+    document.getElementById('from').value = o;
+    document.getElementById('to').value = dst;
+    qs = `origin=${encodeURIComponent(o)}&destination=${encodeURIComponent(dst)}`;
   } else {
     document.getElementById('why').textContent =
       'Enter a from and to address, or pick a preset.';

@@ -10,7 +10,9 @@ from computeAlternativeRoutes, which returns only one alternative in a grid this
 dense.
 """
 
+import asyncio
 import math
+import time
 import subprocess
 from dataclasses import dataclass
 
@@ -29,6 +31,11 @@ FIELD_MASK = (
 CAMERA_MATCH_METRES = 130.0
 
 _token_cache: dict = {}
+
+# Google route geometry for the same trip barely changes minute to minute, and
+# re-requesting ~10 candidates dominated request latency. Density is re-read from
+# the store on every request, so a cached trip still reflects current traffic.
+_route_cache: dict = {}
 
 
 def _access_token() -> str:
@@ -240,8 +247,12 @@ def _lateral_waypoints(path: list[tuple[float, float]]) -> dict[str, tuple]:
     """
     if len(path) < 4:
         return {}
+    # Offset scaled to trip length: a fixed 350m is a sensible parallel street on
+    # a crosstown hop and a meaningless twitch on a trip to JFK.
+    span = _haversine(path[0], path[-1])
+    offset = max(0.0022, min(0.0060, span / 1_600_000))
     out: dict[str, tuple] = {}
-    for frac in (0.35, 0.65):
+    for frac in (0.25, 0.5, 0.75):
         i = int(len(path) * frac)
         a, b = path[max(i - 1, 0)], path[min(i + 1, len(path) - 1)]
         dlat, dlon = b[0] - a[0], b[1] - a[1]
@@ -250,8 +261,8 @@ def _lateral_waypoints(path: list[tuple[float, float]]) -> dict[str, tuple]:
         plat, plon = -dlon / norm, dlat / norm
         for sign, side in ((1, "east"), (-1, "west")):
             out[f"side streets ({side}, {int(frac * 100)}%)"] = (
-                path[i][0] + plat * sign * 0.0032,
-                path[i][1] + plon * sign * 0.0032,
+                path[i][0] + plat * sign * offset,
+                path[i][1] + plon * sign * offset,
             )
     return out
 
@@ -302,6 +313,11 @@ async def geocode(address: str) -> tuple[float, float, str]:
 
 async def compare(origin, destination) -> dict:
     """Google's recommendation vs Sidestreet's, over the same candidate set."""
+    key = f"{origin}|{destination}"
+    hit = _route_cache.get(key)
+    if hit and time.time() - hit["at"] < config.ROUTE_CACHE_TTL:
+        return _score(hit["raw"], cached=True)
+
     async with httpx.AsyncClient() as client:
         base = await _call(client, _body(origin, destination))
         if not base:
@@ -324,31 +340,58 @@ async def compare(origin, destination) -> dict:
         except Exception:
             pass
 
-        vias = dict(_avenue_waypoints(origin, destination))
-        vias.update(_lateral_waypoints(base_path))
-        for name, via in vias.items():
+        # Only offsets derived from the baseline path itself. Picking one
+        # waypoint per known street name worked when the store held one Midtown
+        # corridor, but with all 963 city cameras registered it proposed
+        # "detour via the Queensboro Bridge" on a two-mile crosstown trip.
+        vias = _lateral_waypoints(base_path)
+
+        # Fire every candidate at once. Sequentially this was ~20 round trips
+        # and took long enough to stall a live demo.
+        async def one(name, via):
             try:
                 rs = await _call(client, _body(origin, destination, via))
+                return (name, rs[0]) if rs else None
             except Exception:
-                continue
-            if rs:
-                raw.append((name if name.startswith(("side", "avoid")) else f"via {name}", rs[0]))
+                return None
+
+        items = list(vias.items())[: config.MAX_CANDIDATES]
+        for got in await asyncio.gather(*(one(n, v) for n, v in items)):
+            if got:
+                name, r = got
+                raw.append(
+                    (name if name.startswith(("side", "avoid")) else f"via {name}", r)
+                )
 
         # Detect on demand for any camera these routes cross that the background
         # poller does not cover, so an arbitrary address still gets real data.
-        paths = {}
         needed: list[str] = []
+        seen: set[str] = set()
         for label, r in raw:
             poly = r["polyline"]["encodedPolyline"]
-            if poly in seen_polylines:
+            if poly in seen:
                 continue
-            seen_polylines.add(poly)
-            path = decode_polyline(poly)
-            paths[label] = (r, poly, path)
-            needed += [c["id"] for c in cameras_on_path(path)]
+            seen.add(poly)
+            needed += [c["id"] for c in cameras_on_path(decode_polyline(poly))]
         await poller.ensure_fresh(list(dict.fromkeys(needed)), client)
 
-        google_pick = None
+    _route_cache[key] = {"at": time.time(), "raw": raw}
+    return _score(raw)
+
+
+def _score(raw: list, cached: bool = False) -> dict:
+    candidates: list[Candidate] = []
+    seen_polylines: set[str] = set()
+    paths = {}
+    for label, r in raw:
+        poly = r["polyline"]["encodedPolyline"]
+        if poly in seen_polylines:
+            continue
+        seen_polylines.add(poly)
+        paths[label] = (r, poly, decode_polyline(poly))
+
+    google_pick = None
+    if True:
         for label, (r, poly, path) in paths.items():
             c = Candidate(
                 label=label,

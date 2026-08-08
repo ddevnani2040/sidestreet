@@ -41,6 +41,7 @@ class Camera:
     lat: float
     lon: float
     direction: str = field(default="both")
+    area: str = field(default="")
 
     @property
     def label(self) -> str:
@@ -97,6 +98,7 @@ def all_manhattan(all_cameras: list[dict]) -> list[Camera]:
                 cross_street=_cross_street(c.get("name", "")),
                 lat=c["latitude"],
                 lon=c["longitude"],
+                area=c.get("area", ""),
                 direction=AVENUE_DIRECTION.get(
                     street, "both" if street in TWO_WAY else "one"
                 ),
@@ -179,4 +181,31 @@ def _build_rungs(cams: list[Camera], limit: int) -> list[Camera]:
         chosen.extend(group[: limit - len(chosen)])
 
     chosen.sort(key=lambda c: (CORRIDOR_AVENUES.index(c.avenue), -c.cross_street))
+    return chosen
+
+
+def select_citywide(all_cameras: list[dict], limit: int) -> list[Camera]:
+    """Spread the polled budget over the whole city, not one corridor.
+
+    Only a subset can be polled continuously -- inference cost scales with it --
+    so the subset should cover ground rather than cluster. Cameras are bucketed
+    into a coarse lat/lon grid and one is taken per bucket, round-robin across
+    boroughs, so every borough gets standing coverage instead of Midtown getting
+    all of it and Staten Island none.
+    """
+    cams = all_manhattan(all_cameras)  # all boroughs despite the name
+    by_borough: dict[str, dict[tuple, Camera]] = {}
+    for c in cams:
+        cell = (round(c.lat / 0.012), round(c.lon / 0.015))
+        by_borough.setdefault(c.area or "?", {}).setdefault(cell, c)
+
+    queues = {b: list(cells.values()) for b, cells in by_borough.items()}
+    for q in queues.values():
+        q.sort(key=lambda c: (c.lat, c.lon))
+
+    chosen: list[Camera] = []
+    while len(chosen) < limit and any(queues.values()):
+        for b in sorted(queues):
+            if queues[b] and len(chosen) < limit:
+                chosen.append(queues[b].pop(0))
     return chosen

@@ -29,6 +29,19 @@ JAMMED_RATIO = 1.35
 MIN_VEHICLES_MODERATE = 4
 MIN_VEHICLES_JAMMED = 6
 
+# Highway/expressway cameras. A motorway frame legitimately holds many more
+# moving vehicles than a city block, so the city thresholds read normal traffic
+# as a jam -- Belt Pkwy at 18 vehicles is free-flowing, not stopped. Density is a
+# weak congestion proxy on motorways anyway (fast and full looks like slow and
+# full), and it is exactly where Google's phone-speed data is strongest, so these
+# are held to a much higher bar and flagged low-value.
+HIGHWAY_HINTS = (
+    "expy", "pkwy", "expwy", "thruway", "bridge", " br", "tunnel", "i-",
+    "belt ", "cross bronx", "lie", "bqe", "fdr", "gcp", "hwy", "-eb_at_",
+    "-wb_at_", "-nb_at_", "-sb_at_", "van wyck", "grand central pkwy",
+)
+HIGHWAY_THRESHOLD_MULTIPLIER = 2.5
+
 MIN_SAMPLES = 8
 PARKED_MIN_SAMPLES = 20  # need a quiet moment on record before trusting the floor
 HISTORY = 240  # ~1 hour at a 15s poll interval
@@ -70,12 +83,18 @@ class CameraState:
         p75 = _percentile(sorted(self.counts), 0.75)
         return max((p75 - self.parked_floor) * self.direction_factor, 2.0)
 
+    @property
+    def is_highway(self) -> bool:
+        n = (self.label or "").lower()
+        return any(h in n for h in HIGHWAY_HINTS)
+
     def thresholds(self) -> tuple[float, float]:
         """Vehicle counts at which this camera turns moderate, then jammed."""
         b = self.baseline()
+        m = HIGHWAY_THRESHOLD_MULTIPLIER if self.is_highway else 1.0
         return (
-            max(MIN_VEHICLES_MODERATE, b * MODERATE_RATIO),
-            max(MIN_VEHICLES_JAMMED, b * JAMMED_RATIO),
+            max(MIN_VEHICLES_MODERATE, b * MODERATE_RATIO) * m,
+            max(MIN_VEHICLES_JAMMED, b * JAMMED_RATIO) * m,
         )
 
     @property
@@ -146,8 +165,14 @@ class CameraState:
 
     @property
     def weight(self) -> float:
-        """Routing cost multiplier for the segment this camera watches."""
-        return {FREE: 1.0, MODERATE: 1.8, JAMMED: 4.0, UNKNOWN: 1.3}[self.level]
+        """Routing cost multiplier for the segment this camera watches.
+
+        Motorway readings are damped toward neutral: a camera cannot tell a full
+        fast motorway from a full stopped one, and Google already models
+        motorway flow well from phone data.
+        """
+        w = {FREE: 1.0, MODERATE: 1.8, JAMMED: 4.0, UNKNOWN: 1.3}[self.level]
+        return 1.0 + (w - 1.0) * 0.35 if self.is_highway else w
 
     def as_dict(self) -> dict:
         free_max, moderate_max = self.thresholds()
@@ -163,6 +188,7 @@ class CameraState:
             "effective_vehicles": self.effective_vehicles,
             "direction_factor": self.direction_factor,
             "parked_floor": round(self.parked_floor, 1),
+            "is_highway": self.is_highway,
             "people": self.people,
             "by_class": self.by_class,
             "level": self.level,

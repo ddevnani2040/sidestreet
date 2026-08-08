@@ -42,13 +42,15 @@ CONFIDENCE = int(os.environ.get("CONFIDENCE", "10"))
 # 58 cameras every 2s is ~29 inference calls/sec, which will exhaust a hackathon
 # quota within the hour. Traffic density does not meaningfully change in 2s.
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "25"))
-MAX_CAMERAS = int(os.environ.get("MAX_CAMERAS", "56"))
+MAX_CAMERAS = int(os.environ.get("MAX_CAMERAS", "90"))
 
 # On-demand detection for cameras a requested route crosses but that are not in
 # the continuously polled set.
+MAX_CANDIDATES = int(os.environ.get("MAX_CANDIDATES", "8"))
+ROUTE_CACHE_TTL = float(os.environ.get("ROUTE_CACHE_TTL", "120"))
 ON_DEMAND_TTL = float(os.environ.get("ON_DEMAND_TTL", "120"))
-ON_DEMAND_MAX = int(os.environ.get("ON_DEMAND_MAX", "14"))
-ON_DEMAND_CONCURRENCY = int(os.environ.get("ON_DEMAND_CONCURRENCY", "7"))
+ON_DEMAND_MAX = int(os.environ.get("ON_DEMAND_MAX", "8"))
+ON_DEMAND_CONCURRENCY = int(os.environ.get("ON_DEMAND_CONCURRENCY", "12"))
 POLL_CONCURRENCY = int(os.environ.get("POLL_CONCURRENCY", "4"))
 
 # Archive every fetched frame so there is a replayable clip if the live feed

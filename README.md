@@ -137,6 +137,20 @@ when a requested route actually crosses them.
 - Frames are transient and never stored server-side; the optional local archive
   (`ARCHIVE_FRAMES=1`) writes to disk for demo fallback only.
 
+## Where this works, and where it does not
+
+**Short surface-street trips in dense grids.** That is the whole product. Camera
+density per mile is high, and it is exactly where Google's phone-speed data is
+most ambiguous -- a slow phone could be a red light or gridlock, and a camera
+tells them apart instantly.
+
+**Not motorways.** Density is a weak congestion proxy at speed: a frame holding
+eighteen cars at 55mph looks identical to eighteen cars stopped. An early build
+called Belt Pkwy "jammed" at normal Friday volume and claimed a 24-minute saving
+on a JFK run that was almost certainly nonsense. Motorway cameras are now held to
+2.5x the vehicle threshold and their routing weight is damped 65% toward neutral.
+Google models motorway flow well from phone data; there is little to add there.
+
 ## Known limits
 
 - Night and rain degrade detection badly; the corrections above reduce but do not
