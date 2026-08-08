@@ -134,6 +134,23 @@ region.
 An earlier build spread a fixed budget evenly across five boroughs, which left
 Midtown sampled every ~1.3km -- too coarse to judge a two-mile crosstown trip.
 
+## Running without Google credentials
+
+The hackathon project was decommissioned after the event and its service account
+deleted, which kills the Routes API. Everything else survives -- the DOT feeds
+are public and the Roboflow key is on a personal account -- so the app falls back
+to OSRM's public router for the baseline.
+
+OSRM gives real drivable geometry with correct one-ways and turn restrictions,
+but **no live traffic**, so its durations are free-flow estimates and run well
+below real Midtown conditions. The UI relabels the baseline "Fastest path (OSRM)"
+and shows a banner saying so. It is never presented as Google's number, because
+a free-flow estimate is not a traffic-aware prediction and saying otherwise would
+misrepresent where the figure came from.
+
+Set up Google credentials and it switches back automatically; `provider` in the
+`/api/route` response says which backend served the request.
+
 ## Does it actually beat Google?
 
 Sometimes, and the app says so when it does not. Google's routing is already

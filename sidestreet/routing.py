@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import config, poller
+from . import config, fallback, poller
 from .store import STORE
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
@@ -31,6 +31,11 @@ FIELD_MASK = (
 CAMERA_MATCH_METRES = 130.0
 
 _token_cache: dict = {}
+
+# Which routing backend served the last request. Google when credentials work,
+# OSRM when they do not -- surfaced to the UI so the baseline is never labelled
+# as Google's when it did not come from Google.
+PROVIDER = {"name": "google"}
 
 # Google route geometry for the same trip barely changes minute to minute, and
 # re-requesting ~10 candidates dominated request latency. Density is re-read from
@@ -213,9 +218,16 @@ def _body(origin, destination, via=None) -> dict:
 
 
 async def _call(client: httpx.AsyncClient, body: dict) -> list[dict]:
-    token = _token_cache.get("t")
-    if not token:
-        token = _token_cache["t"] = _access_token()
+    if PROVIDER["name"] == "osrm":
+        return await _call_osrm(body)
+    try:
+        token = _token_cache.get("t")
+        if not token:
+            token = _token_cache["t"] = _access_token()
+    except Exception:
+        # No usable Google credentials -- switch the whole session to OSRM.
+        PROVIDER["name"] = "osrm"
+        return await _call_osrm(body)
     r = await client.post(
         ROUTES_URL,
         headers={
@@ -265,6 +277,22 @@ def _lateral_waypoints(path: list[tuple[float, float]]) -> dict[str, tuple]:
                 path[i][1] + plon * sign * offset,
             )
     return out
+
+
+async def _call_osrm(body: dict) -> list[dict]:
+    """Translate a Routes API request body into an OSRM call."""
+    def pt(w):
+        if "address" in w:
+            return w["address"]
+        ll = w["location"]["latLng"]
+        return (ll["latitude"], ll["longitude"])
+
+    via = body.get("intermediates")
+    return await fallback.route(
+        pt(body["origin"]),
+        pt(body["destination"]),
+        via=pt(via[0]) if via else None,
+    )
 
 
 def _avenue_waypoints(origin, destination) -> dict[str, tuple[float, float]]:
@@ -419,6 +447,7 @@ def _score(raw: list, cached: bool = False) -> dict:
         "google": google_pick.as_dict() if google_pick else None,
         "sidestreet": sidestreet_pick.as_dict(),
         "diverted": bool(google_pick and sidestreet_pick.label != google_pick.label),
+        "provider": PROVIDER["name"],
         "saved_min": round(saved_s / 60, 1),
         "extra_distance_min": (
             round((sidestreet_pick.duration_s - google_pick.duration_s) / 60, 1)
@@ -431,24 +460,26 @@ def _score(raw: list, cached: bool = False) -> dict:
 
 
 def _explain(google: Candidate | None, pick: Candidate) -> str:
+    who = "Google" if PROVIDER["name"] == "google" else "The fastest path"
+    where = f" via {google.description}" if google and google.description else ""
     if not google:
-        return "No Google baseline available."
+        return "No baseline route available."
 
     if not google.cameras:
         return (
-            f"Google routes via {google.description}, but no corridor camera "
+            f"{who} routes{where}, but no corridor camera "
             f"watches it — Sidestreet has nothing to add here."
         )
 
     if pick.label == google.label:
         if google.jammed:
             return (
-                f"Google routes via {google.description}. {google.jammed} "
+                f"{who} routes{where}. {google.jammed} "
                 f"camera(s) on it are jammed, but every alternative looks worse "
                 f"— staying put."
             )
         return (
-            f"Google routes via {google.description}. The "
+            f"{who} routes{where}. The "
             f"{len(google.cameras)} camera(s) watching it are clear. Agreed."
         )
 
@@ -465,32 +496,35 @@ def _explain(google: Candidate | None, pick: Candidate) -> str:
     if abs(delta) < 0.5:
         cost = "for effectively the same predicted time"
     elif delta > 0:
-        cost = f"costing {delta} min more on Google's own estimate"
+        cost = f"costing {delta} min more on the baseline's own estimate"
     else:
-        cost = f"and {abs(delta)} min faster on Google's own estimate"
+        cost = f"and {abs(delta)} min faster on the baseline's own estimate"
 
     return (
-        f"Google routes via {google.description}; cameras show {detail}. "
+        f"{who} routes{where}; cameras show {detail}. "
         f"Sidestreet takes {pick.label} instead, {cost}. "
         f"Observed by {len(pick.cameras)} camera(s) "
         f"({pick.jammed} jammed, {pick.moderate} moderate) "
-        f"vs {len(google.cameras)} on Google's ({google.jammed} jammed, "
+        f"vs {len(google.cameras)} on the baseline ({google.jammed} jammed, "
         f"{google.moderate} moderate)."
     )
 
 
 # Landmarks inside the covered region, used to hunt for a good live demo.
+# Fixed coordinates, not addresses. The demo scanner reuses these constantly and
+# geocoding them every time got us rate-limited (HTTP 429) by Nominatim, which
+# silently emptied the scan. Landmarks do not move.
 DEMO_PLACES = {
-    "Union Sq": "Union Square, New York, NY",
-    "Times Sq": "Times Square, New York, NY",
-    "Grand Central": "Grand Central Terminal, New York, NY",
-    "Columbus Circle": "Columbus Circle, New York, NY",
-    "Chelsea Mkt": "Chelsea Market, New York, NY",
-    "Penn Station": "Penn Station, New York, NY",
-    "UN HQ": "United Nations Headquarters, New York, NY",
-    "Rockefeller": "Rockefeller Center, New York, NY",
-    "Gramercy": "Gramercy Park, New York, NY",
-    "Javits": "Javits Center, New York, NY",
+    "Union Sq": (40.7359, -73.9911),
+    "Times Sq": (40.7580, -73.9855),
+    "Grand Central": (40.7527, -73.9772),
+    "Columbus Circle": (40.7681, -73.9819),
+    "Chelsea Mkt": (40.7424, -74.0061),
+    "Penn Station": (40.7506, -73.9935),
+    "UN HQ": (40.7489, -73.9680),
+    "Rockefeller": (40.7587, -73.9787),
+    "Gramercy": (40.7368, -73.9845),
+    "Javits": (40.7577, -74.0021),
 }
 
 DEMO_PAIRS = [
@@ -526,8 +560,8 @@ async def best_demo(limit: int = 6) -> dict:
         return {
             "from": a,
             "to": b,
-            "origin": DEMO_PLACES[a],
-            "destination": DEMO_PLACES[b],
+            "origin": f"{DEMO_PLACES[a][0]},{DEMO_PLACES[a][1]}",
+            "destination": f"{DEMO_PLACES[b][0]},{DEMO_PLACES[b][1]}",
             "diverted": r["diverted"],
             "saved_min": r["saved_min"],
             "google_min": g["duration_min"],

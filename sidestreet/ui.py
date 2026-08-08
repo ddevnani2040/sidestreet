@@ -100,6 +100,11 @@ INDEX_HTML = """
     font-size: 12.5px; color: #c3cad8; line-height: 1.55;
   }
   .why b { color: #fff; }
+  .provider {
+    margin: 10px 18px 0; padding: 9px 12px; border-radius: 8px;
+    background: #2a2413; border: 1px solid #5c4c1a; color: #f0d49a;
+    font-size: 11.5px; line-height: 1.45;
+  }
 
   .cams { border-top: 1px solid #232733; max-height: 210px; overflow-y: auto; }
   .cam {
@@ -140,16 +145,17 @@ INDEX_HTML = """
     <input id="to" placeholder="To — address or place">
     <select id="trip">
       <option value="">— or pick a short demo route —</option>
-      <option value="Columbus Circle, New York, NY|Union Square, New York, NY">Columbus Circle → Union Sq</option>
-      <option value="Union Square, New York, NY|United Nations Headquarters, New York, NY">Union Sq → UN HQ</option>
-      <option value="Grand Central Terminal, New York, NY|Union Square, New York, NY">Grand Central → Union Sq</option>
-      <option value="Times Square, New York, NY|Gramercy Park, New York, NY">Times Sq → Gramercy</option>
-      <option value="Grand Central Terminal, New York, NY|Javits Center, New York, NY">Grand Central → Javits</option>
-      <option value="Union Square, New York, NY|Penn Station, New York, NY">Union Sq → Penn Station</option>
+      <option value="40.7681,-73.9819|40.7359,-73.9911">Columbus Circle → Union Sq</option>
+      <option value="40.7359,-73.9911|40.7489,-73.9680">Union Sq → UN HQ</option>
+      <option value="40.7527,-73.9772|40.7359,-73.9911">Grand Central → Union Sq</option>
+      <option value="40.7580,-73.9855|40.7368,-73.9845">Times Sq → Gramercy</option>
+      <option value="40.7527,-73.9772|40.7577,-74.0021">Grand Central → Javits</option>
+      <option value="40.7359,-73.9911|40.7506,-73.9935">Union Sq → Penn Station</option>
     </select>
     <button class="go" id="go">Get directions</button>
     <button class="find" id="find">⚡ Find the best demo route right now</button>
   </div>
+  <div id="prov"></div>
   <div class="picks" id="picks"></div>
   <div id="saved"></div>
   <div class="routes" id="routes"></div>
@@ -255,14 +261,24 @@ function draw() {
   if (!same)
     lines.push(L.polyline(s.path, {color:'#34d058', weight:5, opacity:.95}).addTo(map));
 
+  const osrm = data.provider === 'osrm';
   document.getElementById('routes').innerHTML =
-    card('g','Google Maps', g) + (same ? '' : card('s','Sidestreet', s));
+    card('g', osrm ? 'Fastest path (OSRM)' : 'Google Maps', g) +
+    (same ? '' : card('s','Sidestreet', s));
+
+  document.getElementById('prov').innerHTML = osrm
+    ? `<div class="provider"><b>No Google credentials</b> — the baseline is
+       OSRM's fastest path, which has no live traffic, so its times run below
+       real Midtown conditions. Camera density below is live and real.</div>`
+    : '';
 
   const sv = document.getElementById('saved');
-  if (data.diverted && data.saved_min > 0.2) {
+  if (data.diverted) {
     const extra = data.extra_distance_min;
     sv.innerHTML = `<div class="saved">
-      <div class="big">Side streets save ~${data.saved_min} min</div>
+      <div class="big">${data.saved_min > 0.2
+          ? 'Side streets save ~' + data.saved_min + ' min'
+          : 'Fewer jammed blocks this way'}</div>
       <div class="cap">${extra > 0
           ? extra + ' min longer to drive, but past ' +
             (g.jammed - s.jammed) + ' fewer jammed blocks'
