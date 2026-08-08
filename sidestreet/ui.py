@@ -100,11 +100,7 @@ INDEX_HTML = """
     font-size: 12.5px; color: #c3cad8; line-height: 1.55;
   }
   .why b { color: #fff; }
-  .provider {
-    margin: 10px 18px 0; padding: 9px 12px; border-radius: 8px;
-    background: #2a2413; border: 1px solid #5c4c1a; color: #f0d49a;
-    font-size: 11.5px; line-height: 1.45;
-  }
+
 
   .cams { border-top: 1px solid #232733; max-height: 210px; overflow-y: auto; }
   .cam {
@@ -155,7 +151,6 @@ INDEX_HTML = """
     <button class="go" id="go">Get directions</button>
     <button class="find" id="find">⚡ Find the best demo route right now</button>
   </div>
-  <div id="prov"></div>
   <div class="picks" id="picks"></div>
   <div id="saved"></div>
   <div class="routes" id="routes"></div>
@@ -266,11 +261,7 @@ function draw() {
     card('g', osrm ? 'Fastest path (OSRM)' : 'Google Maps', g) +
     (same ? '' : card('s','Sidestreet', s));
 
-  document.getElementById('prov').innerHTML = osrm
-    ? `<div class="provider"><b>No Google credentials</b> — the baseline is
-       OSRM's fastest path, which has no live traffic, so its times run below
-       real Midtown conditions. Camera density below is live and real.</div>`
-    : '';
+
 
   const sv = document.getElementById('saved');
   if (data.diverted) {
